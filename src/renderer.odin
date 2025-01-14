@@ -5,7 +5,7 @@ import "core:strings"
 import "core:fmt"
 import "core:c"
 
-render_screen :: proc(state: State, screen: ^Screen) {
+render_screen :: proc(state: State, screen: ^Screen, buffered_input: string) {
     font_size : c.int = 20
     cell_width := rl.MeasureText("M", font_size)
     cell_height := font_size
@@ -17,15 +17,23 @@ render_screen :: proc(state: State, screen: ^Screen) {
     rl.BeginDrawing()
     rl.ClearBackground(rl.BLACK)
 
+    if screen.cursor_visible {
+        x := c.int(screen.cursor_col) * cell_width
+        y := c.int(screen.cursor_row) * cell_height
+
+        for ch in buffered_input {
+            pos := [2]f32{f32(x),f32(y)}
+            rl.DrawTextCodepoint(rl.GetFontDefault(), ch, pos, f32(font_size), rl.Color(screen.fg_color))
+            x += cell_width
+        }
+
+        rl.DrawRectangle(x, y, cell_width, cell_height, rl.Color(screen.fg_color))
+    }
 
     y : c.int
     x : c.int
     for row in 0..<screen.rows {
         for col in 0..<screen.cols {
-
-            if screen.cursor_visible && row == screen.cursor_row && col == screen.cursor_col {
-                rl.DrawRectangle(x, y, cell_width, cell_height, rl.Color(screen.fg_color))
-            }
 
             index := one_dim_index(row, col, screen.cols)
             cell := screen.cells[index]

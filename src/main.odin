@@ -12,7 +12,6 @@ import "core:io"
 import "core:c"
 import "core:log"
 import sa "core:container/small_array"
-import "core:unicode/utf8"
 import "base:runtime"
 
 State :: struct {
@@ -109,8 +108,8 @@ start_ui :: proc(state: State) {
     defer rl.CloseWindow()
     rl.SetTargetFPS(60)
 
-    input := strings.builder_make();
-    defer strings.builder_destroy(&input)
+    buffered_input := strings.builder_make();
+    defer strings.builder_destroy(&buffered_input)
 
     // arena : mem.Dynamic_Arena
     // mem.dynamic_arena_init(&arena)
@@ -123,28 +122,30 @@ start_ui :: proc(state: State) {
 
     for ! rl.WindowShouldClose() {
 
-        defer strings.builder_reset(&input)
         for ch := rl.GetCharPressed(); ch > 0; ch = rl.GetCharPressed() {
-            _, err := strings.write_rune(&input, ch)
+            _, err := strings.write_rune(&buffered_input, ch)
             if err != nil {
-                fmt.eprintln("input err: ", err)
+                log.error("input err: ", err)
                 break
             }
         }
 
-        if rl.IsKeyPressed(.ENTER) {
-            strings.write_rune(&input, rune('\n'))
+        if rl.IsKeyPressed(.ENTER) || rl.IsKeyPressedRepeat(.ENTER) {
+            strings.write_rune(&buffered_input, rune('\n'))
+            if _, err := os.write(os.Handle(state.pt_fd), buffered_input.buf[:]); err != nil {
+                fmt.eprintln("writing to master err: ", err)
+            }
+            strings.builder_reset(&buffered_input)
         }
 
-        if _, err := os.write(os.Handle(state.pt_fd), input.buf[:]); err != nil {
-            fmt.eprintln("writing to master err: ", err)
-        }
 
         update_screen(state, &screen)
 
         // context.allocator = arena_allocator
-        render_screen(state, &screen)
+        render_screen(state, &screen, strings.to_string(buffered_input))
         // context.allocator = context_alloctor
+
+        free_all(context.temp_allocator)
     }
 }
 
