@@ -41,10 +41,11 @@ render_screen :: proc(state: State, screen: ^Screen, buffered_input: string) {
             grid_color := rl.GRAY; grid_color.a = 0x0F;
             rl.DrawRectangleLines(x, y, cell_width, cell_height, grid_color)
             rl.DrawRectangle(x, y, cell_width, cell_height, rl.Color(cell.bg_color))
-            if len(cell.grapheme) > 0 {
-                cstr := strings.clone_to_cstring(cell.grapheme)
-                defer delete(cstr)
-
+            if strings.builder_len(cell.grapheme) > 0 {
+                cstr := strings.clone_to_cstring(
+                    strings.to_string(cell.grapheme),
+                    context.temp_allocator
+                )
 
                 if cstr != " " && cstr != "\n" && cstr != "\r" {
                     rl.DrawText(cstr, x,y, font_size, rl.Color(cell.fg_color))

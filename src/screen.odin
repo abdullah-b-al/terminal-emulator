@@ -51,7 +51,7 @@ Grapheme_Handle :: distinct int
 
 Cell :: struct {
     // TODO: Use a grapheme datatype instead of a string
-    grapheme : string,
+    grapheme : strings.Builder,
     graphics: Graphics_Set,
     bg_color: Color,
     fg_color: Color,
@@ -72,6 +72,25 @@ Screen :: struct {
 
 screen_init :: proc(rows, cols: Screen_Pos) -> (screen: Screen, error: mem.Allocator_Error) {
     cells := make([]Cell, rows * cols) or_return
+
+    free_cells := false
+    cells_inited := 0
+    defer if free_cells {
+        for &cell in cells[:cells_inited] do cell_destroy(&cell)
+        delete(cells)
+    }
+
+    for &cell, i in cells {
+        builder : strings.Builder
+        _, err := strings.builder_init_none(&builder)
+        if err != nil {
+            free_cells = true
+            return
+        }
+        cell = Cell{ grapheme = builder }
+        cells_inited = i
+    }
+
     return Screen{
         rows = rows,
         cols = cols,
@@ -88,35 +107,16 @@ screen_destroy :: proc(screen: ^Screen) {
     delete(screen.cells)
 }
 
-cell_init :: proc(screen: Screen, bytes: []byte) -> (cell: Cell, runes_size: int) {
-    ch, size := utf8.decode_rune_in_bytes(bytes)
-    runes := [?]rune{ch}
-    str := utf8.runes_to_string(runes[:])
-    index := screen.cursor_row + (screen.cursor_col * screen.rows)
-    return Cell{
-        grapheme = str,
-        fg_color = screen.fg_color,
-        bg_color = screen.bg_color,
-        graphics = screen.graphics,
-    }, size
-}
-
 cell_destroy :: proc(cell: ^Cell) {
-    delete(cell.grapheme)
+    strings.builder_destroy(&cell.grapheme)
 }
 
 screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
-
     cell_index := one_dim_index(screen.cursor_row , screen.cursor_col, screen.cols)
-
-    cell : Cell
-    cell, runes_size = cell_init(screen^, bytes)
-    if cell.grapheme == "\n" {
-        if !set_cell_in_slice(screen, cell, cell_index) do cell_destroy(&cell)
+    if bytes[0] == '\n' {
         screen.cursor_row = min(screen.cursor_row + 1, screen.rows)
         screen.cursor_col = 0
     } else if .line_wrapping in screen.graphics {
-        if !set_cell_in_slice(screen, cell, cell_index) do cell_destroy(&cell)
         if screen.cursor_col == screen.cols {
             // FIXME: This will cause out of bounds indexing
             screen.cursor_row = min(screen.cursor_row + 1, screen.rows)
@@ -125,15 +125,26 @@ screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
             screen.cursor_col += 1
         }
     } else if .line_wrapping not_in screen.graphics {
-        if screen.cursor_col > screen.cols {
-            cell_destroy(&cell)
+        if screen.cursor_col >= screen.cols {
             return
-        } else if screen.cursor_col == screen.cols {
-            if !set_cell_in_slice(screen, cell, cell_index) do cell_destroy(&cell)
+        } else if screen.cursor_col < screen.cols {
             screen.cursor_col += 1
         }
     }
 
+    { // setting the cell
+        if cell_index >= len(screen.cells) do return
+
+        cell := &screen.cells[cell_index]
+        strings.builder_reset(&cell.grapheme)
+
+        ch : rune
+        ch, runes_size = utf8.decode_rune(bytes)
+        strings.write_rune(&cell.grapheme, ch)
+        cell.fg_color = screen.fg_color
+        cell.bg_color = screen.bg_color
+        cell.graphics = screen.graphics
+    }
 
     return
 }
@@ -248,12 +259,4 @@ set_colors :: proc(screen: ^Screen, colors: ^Command_Color_Array) {
         case .bg: screen.bg_color = color
         }
     }
-}
-
-
-@(private)
-set_cell_in_slice :: proc(screen: ^Screen, cell: Cell, index: int) -> bool {
-    if index >= len(screen.cells) do return false
-    screen.cells[index] = cell
-    return true
 }
