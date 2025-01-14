@@ -171,7 +171,7 @@ read_from_fd :: proc(fd : FD, buf: []byte) -> (size: int, error: io.Error) {
         }
 
         stream := os.stream_from_handle(os.Handle(fd))
-        size, error = io.read_at_least(stream, buf, len(buf))
+        size, error = io.read(stream, buf)
         return
     }
 
