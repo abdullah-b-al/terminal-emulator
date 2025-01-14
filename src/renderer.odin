@@ -22,6 +22,11 @@ render_screen :: proc(state: State, screen: ^Screen) {
     x : c.int
     for row in 0..<screen.rows {
         for col in 0..<screen.cols {
+
+            if screen.cursor_visible && row == screen.cursor_row && col == screen.cursor_col {
+                rl.DrawRectangle(x, y, cell_width, cell_height, rl.Color(screen.fg_color))
+            }
+
             index := one_dim_index(row, col, screen.cols)
             cell := screen.cells[index]
 
@@ -39,8 +44,8 @@ render_screen :: proc(state: State, screen: ^Screen) {
             }
 
             x += cell_width
-
         }
+
         y += cell_height
         x = 0
     }

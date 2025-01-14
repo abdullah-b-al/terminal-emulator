@@ -76,6 +76,7 @@ screen_init :: proc(rows, cols: Screen_Pos) -> (screen: Screen, error: mem.Alloc
         rows = rows,
         cols = cols,
         cells = cells,
+        cursor_visible = true,
         fg_color = rgba_table[.white],
         bg_color = rgba_table[.black],
         graphics = {.line_wrapping}
@@ -205,8 +206,11 @@ apply_command :: proc(screen: ^Screen, cmd: Command) {
             screen.cursor_col = 0
         }
 
-    case Command_Set_Cursor_Visible: log.error("Unimplemented command 'Command_Set_Cursor_Visible'")
-    case Command_Set_Cursor_Invisible: log.error("Unimplemented command 'Command_Set_Cursor_Invisible'")
+    case Command_Set_Cursor_Visible:
+        screen.cursor_visible = true
+    case Command_Set_Cursor_Invisible:
+        screen.cursor_visible = false
+
     case Command_Colors_Graphics:
         set_colors(screen, &data.colors)
     case Command_Color_Array:
