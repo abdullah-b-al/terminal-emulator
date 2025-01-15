@@ -169,27 +169,34 @@ update_screen :: proc(state: ^State) {
         loop: for i < buf_size {
             parser := parser_init(buf[i:buf_size])
             cmd, seq_len, err := parser_parse(&parser)
-
-            switch err {
+            switch e in err {
             case nil:
                 apply_command(state, screen, cmd)
                 i += seq_len
                 break loop
-            case .Incomplete_Sequence:
+            case ParseError: switch e {
+                case .Incomplete_Sequence:
 
-                safe_log_sequence(buf[i:buf_size], "Incomplete sequence", .info)
-                buf_size = copy(buf[:], buf[i:buf_size])
-                read, err := read_from_fd(state.pt_fd, buf[buf_size:])
-                buf_size += read
-                i = 0
-                continue loop
+                    safe_log_sequence(buf[i:buf_size], "Incomplete sequence", .info)
+                    buf_size = copy(buf[:], buf[i:buf_size])
+                    read, err := read_from_fd(state.pt_fd, buf[buf_size:])
+                    buf_size += read
+                    i = 0
+                    continue loop
 
-            case .Invalid_Sequence, .Unknown_Sequence:
-                // display the sequence on the screen
-                i += screen_set_cell(screen, buf[i:])
-                break loop
-            case .EOF:
-                break loop
+                case .Invalid_Sequence, .Unknown_Sequence:
+                    // display the sequence on the screen
+                    i += screen_set_cell(screen, buf[i:])
+                    break loop
+                case .Unsupported_Sequence:
+                    i += seq_len
+                    break loop
+                case .EOF:
+                    break loop
+                }
+
+            case mem.Allocator_Error:
+                log.error("Allocator_Error:", e)
             }
         }
     }

@@ -75,6 +75,7 @@ ParseError :: enum {
     Incomplete_Sequence,
     Invalid_Sequence,
     Unknown_Sequence,
+    Unsupported_Sequence,
     EOF,
 }
 
