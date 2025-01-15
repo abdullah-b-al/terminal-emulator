@@ -262,12 +262,14 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
             cmd = Command_Graphics{ set=set, graphics=graphics }
 
         case "?25":
-            cmd = Command_Set_Cursor_Invisible{} if ch == 'l' else Command_Set_Cursor_Visible{}
-        case "?1049":
-            cmd = Command_Set_Alternate_Screen{}
             switch ch {
-            case 'l':cmd = false
-            case 'h':cmd = true
+            case 'l':cmd = Command_Set_Cursor_Visible(false)
+            case 'h':cmd = Command_Set_Cursor_Visible(true)
+            }
+        case "?1049":
+            switch ch {
+            case 'l':cmd = Command_Set_Alternate_Screen(false)
+            case 'h':cmd = Command_Set_Alternate_Screen(true)
             }
         case:
             fmt.printfln("%s",sa.slice(&joined))

@@ -55,8 +55,7 @@ Command_Graphics :: struct {
 }
 
 Command_Clear_Screen :: struct {}
-Command_Set_Cursor_Visible :: struct {}
-Command_Set_Cursor_Invisible :: struct {}
+Command_Set_Cursor_Visible :: distinct bool
 Command_Set_Alternate_Screen :: distinct bool
 
 Command :: union {
@@ -68,7 +67,6 @@ Command :: union {
     Command_Graphics,
     Command_Color_Array,
     Command_Set_Cursor_Visible,
-    Command_Set_Cursor_Invisible,
     Command_Set_Alternate_Screen,
 }
 

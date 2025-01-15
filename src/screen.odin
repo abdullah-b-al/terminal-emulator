@@ -233,10 +233,7 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
         state.focus_on = .alternate if data else .primary
         log.info("Set", state.focus_on, "screen")
     case Command_Set_Cursor_Visible:
-        screen.cursor_visible = true
-    case Command_Set_Cursor_Invisible:
-        screen.cursor_visible = false
-
+        screen.cursor_visible = bool(data)
     case Command_Colors_Graphics:
         set_colors(screen, &data.colors)
     case Command_Color_Array:
