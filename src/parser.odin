@@ -263,6 +263,12 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
 
         case "?25":
             cmd = Command_Set_Cursor_Invisible{} if ch == 'l' else Command_Set_Cursor_Visible{}
+        case "?1049":
+            cmd = Command_Set_Alternate_Screen{}
+            switch ch {
+            case 'l':cmd = false
+            case 'h':cmd = true
+            }
         case:
             fmt.printfln("%s",sa.slice(&joined))
             safe_log_sequence(parser.data)

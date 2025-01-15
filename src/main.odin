@@ -17,7 +17,10 @@ import "base:runtime"
 State :: struct {
     // Writing to this will send data to the slave
     // reading will receive data from the slave
-    pt_fd : FD,
+    pt_fd: FD,
+    primary: Screen,
+    alternate: Screen,
+    focus_on: enum{primary, alternate},
 }
 
 enable_raw_mode :: proc() {
@@ -80,7 +83,7 @@ main :: proc() {
         start_program(sa.slice(&argv))
     case: // parent
         linux.close(slave_fd) // not needed in the master
-        start_ui(state)
+        start_ui(&state)
         linux.close(state.pt_fd)
     }
 }
@@ -103,7 +106,7 @@ start_program :: proc (argv: []string) -> mem.Allocator_Error {
     return nil
 }
 
-start_ui :: proc(state: State) {
+start_ui :: proc(state: ^State) {
     rl.InitWindow(1000, 1000, "Hello there!")
     defer rl.CloseWindow()
     rl.SetTargetFPS(60)
@@ -117,8 +120,18 @@ start_ui :: proc(state: State) {
     // arena_allocator := mem.dynamic_arena_allocator(&arena)
     // context_alloctor := context.allocator
 
-    screen, error := screen_init(50, 100)
-    defer screen_destroy(&screen)
+    {
+        screen, error := screen_init(50, 100)
+        state.primary = screen
+
+        screen, error = screen_init(50, 100)
+        state.alternate = screen
+
+    }
+    defer {
+        screen_destroy(&state.primary)
+        screen_destroy(&state.alternate)
+    }
 
     for ! rl.WindowShouldClose() {
 
@@ -139,10 +152,15 @@ start_ui :: proc(state: State) {
         }
 
 
-        update_screen(state, &screen)
 
+        update_screen(state)
         // context.allocator = arena_allocator
-        render_screen(state, &screen, strings.to_string(buffered_input))
+        screen : ^Screen
+        switch state.focus_on {
+        case .primary: screen = &state.primary
+        case .alternate: screen = &state.alternate
+        }
+        render_screen(state^, screen, strings.to_string(buffered_input))
         // context.allocator = context_alloctor
 
         free_all(context.temp_allocator)

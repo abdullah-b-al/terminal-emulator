@@ -149,13 +149,19 @@ screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
     return
 }
 
-update_screen :: proc(state: State, screen: ^Screen) {
+update_screen :: proc(state: ^State) {
     buf: [512]byte
     buf_size, err := read_from_fd(state.pt_fd, buf[:])
 
     row, col : int
     i : int
     for i < buf_size {
+        screen : ^Screen
+        switch state.focus_on {
+        case .primary: screen = &state.primary
+        case .alternate: screen = &state.alternate
+        }
+
         for i < buf_size && buf[i] != ESCAPE {
             i += screen_set_cell(screen, buf[i:])
         }
@@ -166,7 +172,7 @@ update_screen :: proc(state: State, screen: ^Screen) {
 
             switch err {
             case nil:
-                apply_command(screen, cmd)
+                apply_command(state, screen, cmd)
                 i += seq_len
                 break loop
             case .Incomplete_Sequence:
@@ -190,7 +196,7 @@ update_screen :: proc(state: State, screen: ^Screen) {
 }
 
 @(private)
-apply_command :: proc(screen: ^Screen, cmd: Command) {
+apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
     switch &data in cmd {
     case Command_Clear_Screen: log.error("Unimplemented command 'clear'")
     case Command_Move_Row_Col:
@@ -223,6 +229,9 @@ apply_command :: proc(screen: ^Screen, cmd: Command) {
             screen.cursor_col = 0
         }
 
+    case Command_Set_Alternate_Screen:
+        state.focus_on = .alternate if data else .primary
+        log.info("Set", state.focus_on, "screen")
     case Command_Set_Cursor_Visible:
         screen.cursor_visible = true
     case Command_Set_Cursor_Invisible:
