@@ -112,22 +112,26 @@ cell_destroy :: proc(cell: ^Cell) {
 }
 
 screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
+
+    if screen.cursor_row >= screen.rows {
+        screen_scroll_one_down(screen)
+        screen.cursor_row = screen.rows - 1
+    }
+
     cell_index := one_dim_index(screen.cursor_row , screen.cursor_col, screen.cols)
+
     if bytes[0] == '\n' {
         screen.cursor_row = min(screen.cursor_row + 1, screen.rows)
         screen.cursor_col = 0
     } else if .line_wrapping in screen.graphics {
-        if screen.cursor_col == screen.cols {
-            // FIXME: This will cause out of bounds indexing
-            screen.cursor_row = min(screen.cursor_row + 1, screen.rows)
+        if screen.cursor_col == screen.cols - 1 {
+            screen.cursor_row += 1
             screen.cursor_col = 0
         } else {
             screen.cursor_col += 1
         }
     } else if .line_wrapping not_in screen.graphics {
-        if screen.cursor_col >= screen.cols {
-            return
-        } else if screen.cursor_col < screen.cols {
+        if screen.cursor_col < screen.cols {
             screen.cursor_col += 1
         }
     }
@@ -135,7 +139,9 @@ screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
     { // setting the cell
         ch : rune
         ch, runes_size = utf8.decode_rune(bytes)
-        if cell_index >= len(screen.cells) do return runes_size // skip
+        if cell_index >= len(screen.cells) {
+            return runes_size
+        }
 
         cell := &screen.cells[cell_index]
         strings.builder_reset(&cell.grapheme)
@@ -147,6 +153,24 @@ screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
     }
 
     return
+}
+
+screen_scroll_one_down :: proc(screen: ^Screen) {
+    // free the first row
+    for i in 0..<screen.cols {
+        cell_destroy(&screen.cells[i])
+    }
+
+    copy(screen.cells, screen.cells[screen.cols:])
+
+    // init the last row
+    // TODO: Find out if builder can fail to allocate here
+    for col in 0..<screen.cols {
+        i := one_dim_index(screen.rows - 1, col, screen.cols)
+        builder : strings.Builder
+        strings.builder_init_none(&builder)
+        screen.cells[i] = Cell{ grapheme = builder }
+    }
 }
 
 update_screen :: proc(state: ^State) {

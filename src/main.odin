@@ -151,8 +151,6 @@ start_ui :: proc(state: ^State) {
             strings.builder_reset(&buffered_input)
         }
 
-
-
         update_screen(state)
         // context.allocator = arena_allocator
         screen : ^Screen

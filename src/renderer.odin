@@ -30,10 +30,10 @@ render_screen :: proc(state: State, screen: ^Screen, buffered_input: string) {
         rl.DrawRectangle(x, y, cell_width, cell_height, rl.Color(screen.fg_color))
     }
 
-    y : c.int
-    x : c.int
     for row in 0..<screen.rows {
         for col in 0..<screen.cols {
+            x := c.int(col) * cell_width
+            y := c.int(row) * cell_height
 
             index := one_dim_index(row, col, screen.cols)
             cell := screen.cells[index]
@@ -51,12 +51,8 @@ render_screen :: proc(state: State, screen: ^Screen, buffered_input: string) {
                     rl.DrawText(cstr, x,y, font_size, rl.Color(cell.fg_color))
                 }
             }
-
-            x += cell_width
         }
 
-        y += cell_height
-        x = 0
     }
     rl.EndDrawing()
 }
