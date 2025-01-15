@@ -133,13 +133,13 @@ screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
     }
 
     { // setting the cell
-        if cell_index >= len(screen.cells) do return
+        ch : rune
+        ch, runes_size = utf8.decode_rune(bytes)
+        if cell_index >= len(screen.cells) do return runes_size // skip
 
         cell := &screen.cells[cell_index]
         strings.builder_reset(&cell.grapheme)
 
-        ch : rune
-        ch, runes_size = utf8.decode_rune(bytes)
         strings.write_rune(&cell.grapheme, ch)
         cell.fg_color = screen.fg_color
         cell.bg_color = screen.bg_color
