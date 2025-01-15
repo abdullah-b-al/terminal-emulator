@@ -127,6 +127,9 @@ parser_parse :: proc(parser: ^Parser) -> (cmd: Command, seq_length: int, error: 
         case ']':
             safe_log_sequence(parser.data)
             return {}, parser.offset, ParseError.Unknown_Sequence
+        case '(', ')':
+            cmd, error = parse_g_sets(parser)
+            return cmd, parser.offset, error
         case:
             safe_log_sequence(parser.data)
             return {}, parser.offset, ParseError.Unknown_Sequence
@@ -182,7 +185,8 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
     case 'A'..='G':
         parser_advance(parser)
         if sa.len(split) != 1 { // expect one argument
-            return {}, nil
+            safe_log_sequence(parser.data)
+            return {}, .Unknown_Sequence
         }
 
         number := parse_int(transmute(string)sa.get(split, 0), .Invalid_Sequence) or_return
@@ -202,6 +206,17 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
         }
 
         error = nil
+        return
+
+    case 'd':
+        parser_advance(parser)
+        if sa.len(split) != 1 { // expect one argument
+            safe_log_sequence(parser.data)
+            return {}, .Unknown_Sequence
+        }
+
+        number := parse_int(transmute(string)sa.get(split, 0), .Invalid_Sequence) or_return
+        cmd =  Command_Move{wise = .row, pos = number}
         return
 
     case 'm':
@@ -281,6 +296,23 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
         return
     case:
         safe_log_sequence(parser.data)
+        return {}, .Unknown_Sequence
+    }
+
+    return
+}
+
+parse_g_sets :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
+    ch := parser.char
+    parser_advance(parser)
+    switch ch {
+    case '(', ')':
+        parser_advance(parser)
+        safe_log_sequence(parser.data, "Unsupported sequence", .info)
+        return {}, .Unsupported_Sequence
+    case:
+        safe_log_sequence(parser.data)
+        return {}, .Unknown_Sequence
     }
 
     return
