@@ -193,8 +193,14 @@ update_screen :: proc(state: State, screen: ^Screen) {
 apply_command :: proc(screen: ^Screen, cmd: Command) {
     switch &data in cmd {
     case Command_Clear_Screen: log.error("Unimplemented command 'clear'")
-    case Command_Move_Row_Col: log.error("Unimplemented command 'Command_Move_Row_Col'")
-    case Command_Move: log.error("Unimplemented command 'Command_Move'")
+    case Command_Move_Row_Col:
+        screen.cursor_row = data.row
+        screen.cursor_col = data.col
+    case Command_Move:
+        switch data.wise {
+        case .row: screen.cursor_row = data.pos
+        case .col: screen.cursor_col = data.pos
+        }
     case Command_Move_Offset:
         switch data.wise {
         case .row:
