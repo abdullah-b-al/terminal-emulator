@@ -30,29 +30,27 @@ render_screen :: proc(state: State, screen: ^Screen, buffered_input: string) {
         rl.DrawRectangle(x, y, cell_width, cell_height, rl.Color(screen.fg_color))
     }
 
-    for row in 0..<screen.rows {
-        for col in 0..<screen.cols {
-            x := c.int(col) * cell_width
-            y := c.int(row) * cell_height
+    for index in 0..<len(screen.cells) {
+        row, col := two_dim_index(index, screen.cols)
+        x := c.int(col) * cell_width
+        y := c.int(row) * cell_height
 
-            index := one_dim_index(row, col, screen.cols)
-            cell := screen.cells[index]
+        index := one_dim_index(row, col, screen.cols)
+        cell := screen.cells[index]
 
-            grid_color := rl.GRAY; grid_color.a = 0x0F;
-            rl.DrawRectangleLines(x, y, cell_width, cell_height, grid_color)
-            rl.DrawRectangle(x, y, cell_width, cell_height, rl.Color(cell.bg_color))
-            if strings.builder_len(cell.grapheme) > 0 {
-                cstr := strings.clone_to_cstring(
-                    strings.to_string(cell.grapheme),
-                    context.temp_allocator
-                )
+        grid_color := rl.GRAY; grid_color.a = 0x0F;
+        rl.DrawRectangleLines(x, y, cell_width, cell_height, grid_color)
+        rl.DrawRectangle(x, y, cell_width, cell_height, rl.Color(cell.bg_color))
+        if strings.builder_len(cell.grapheme) > 0 {
+            cstr := strings.clone_to_cstring(
+                strings.to_string(cell.grapheme),
+                context.temp_allocator
+            )
 
-                if cstr != " " && cstr != "\n" && cstr != "\r" {
-                    rl.DrawText(cstr, x,y, font_size, rl.Color(cell.fg_color))
-                }
+            if cstr != " " && cstr != "\n" && cstr != "\r" {
+                rl.DrawText(cstr, x,y, font_size, rl.Color(cell.fg_color))
             }
         }
-
     }
     rl.EndDrawing()
 }

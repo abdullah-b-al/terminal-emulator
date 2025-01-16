@@ -58,7 +58,7 @@ Cell :: struct {
 }
 
 Screen :: struct {
-    cells: []Cell,
+    cells: [dynamic]Cell,
     rows, cols: Screen_Pos,
 
     cursor_visible: bool,
@@ -71,24 +71,10 @@ Screen :: struct {
 }
 
 screen_init :: proc(rows, cols: Screen_Pos) -> (screen: Screen, error: mem.Allocator_Error) {
-    cells := make([]Cell, rows * cols) or_return
-
-    free_cells := false
-    cells_inited := 0
-    defer if free_cells {
-        for &cell in cells[:cells_inited] do cell_destroy(&cell)
-        delete(cells)
-    }
+    cells := make([dynamic]Cell, rows * cols) or_return
 
     for &cell, i in cells {
-        builder : strings.Builder
-        _, err := strings.builder_init_none(&builder)
-        if err != nil {
-            free_cells = true
-            return
-        }
-        cell = Cell{ grapheme = builder }
-        cells_inited = i
+        cell = cell_init()
     }
 
     return Screen{
@@ -102,9 +88,38 @@ screen_init :: proc(rows, cols: Screen_Pos) -> (screen: Screen, error: mem.Alloc
     }, nil
 }
 
+screen_resize :: proc(screen: ^Screen, rows, cols: int) -> mem.Allocator_Error {
+    if rows * cols > len(screen.cells) {
+        cells_for_extra_col := screen.rows * diff(screen.cols, cols)
+        cells_for_extra_row := screen.cols * diff(screen.rows, rows)
+
+        old_len := len(screen.cells)
+        new_len := len(screen.cells) + cells_for_extra_col + cells_for_extra_row
+        assert(new_len > len(screen.cells))
+        resize(&screen.cells, new_len) or_return
+
+        for &cell in screen.cells[old_len:] {
+            cell = cell_init()
+        }
+    }
+
+    screen.rows = rows
+    screen.cols = cols
+
+    screen.cursor_col = min(screen.cursor_col, screen.cols - 1)
+
+    return nil
+}
+
 screen_destroy :: proc(screen: ^Screen) {
     for &cell in screen.cells do cell_destroy(&cell)
     delete(screen.cells)
+}
+
+cell_init :: proc(loc := #caller_location) -> Cell {
+    builder : strings.Builder
+    strings.builder_init_none(&builder, context.allocator, loc)
+    return Cell{ grapheme = builder }
 }
 
 cell_destroy :: proc(cell: ^Cell) {
@@ -114,7 +129,8 @@ cell_destroy :: proc(cell: ^Cell) {
 screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
 
     if screen.cursor_row >= screen.rows {
-        screen_scroll_one_down(screen)
+        diff := diff(screen.cursor_row, screen.rows)
+        screen_scroll(screen, max(diff, 1))
         screen.cursor_row = screen.rows - 1
     }
 
@@ -155,21 +171,20 @@ screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
     return
 }
 
-screen_scroll_one_down :: proc(screen: ^Screen) {
+screen_scroll :: proc(screen: ^Screen, rows: int) {
+    assert(rows > 0)
+
+    destroy_len := screen.cols * rows
     // free the first row
-    for i in 0..<screen.cols {
+    for i in 0..<destroy_len {
         cell_destroy(&screen.cells[i])
     }
 
-    copy(screen.cells, screen.cells[screen.cols:])
+    copied := copy(screen.cells[:], screen.cells[destroy_len:])
 
-    // init the last row
-    // TODO: Find out if builder can fail to allocate here
-    for col in 0..<screen.cols {
-        i := one_dim_index(screen.rows - 1, col, screen.cols)
-        builder : strings.Builder
-        strings.builder_init_none(&builder)
-        screen.cells[i] = Cell{ grapheme = builder }
+    // init the last rows
+    for &cell in screen.cells[copied:] {
+        cell = cell_init()
     }
 }
 
@@ -302,4 +317,9 @@ set_colors :: proc(screen: ^Screen, colors: ^Command_Color_Array) {
         case .bg: screen.bg_color = color
         }
     }
+}
+
+@(private)
+diff :: proc(a: int, b: int) -> int {
+    return a - b if a >= b else b - a
 }
