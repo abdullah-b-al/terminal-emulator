@@ -242,7 +242,7 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
                 color.layer = .fg if layer == "38" else .bg
 
                 array : Command_Color_Array
-                sa.set(&array, 0, color)
+                sa.append(&array, color)
                 cmd = array
         case:
             result := Command_Colors_Graphics{}
@@ -273,8 +273,8 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
         switch string(sa.slice(&joined)) {
         case "?7":
             graphics : Command_Graphics_Array
-            sa.set(&graphics, 0, Graphics_Kind.line_wrapping)
-            set := true if ch == 'l' else false
+            sa.append(&graphics, Graphics_Kind.line_wrapping)
+            set := false if ch == 'l' else true
             cmd = Command_Graphics{ set=set, graphics=graphics }
 
         case "?25":
