@@ -288,7 +288,6 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
             case 'h':cmd = Command_Set_Alternate_Screen(true)
             }
         case:
-            fmt.printfln("%s",sa.slice(&joined))
             safe_log_sequence(parser.data)
             return {}, .Unknown_Sequence
         }

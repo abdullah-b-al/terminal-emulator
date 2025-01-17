@@ -58,11 +58,13 @@ Cell :: struct {
 }
 
 Screen :: struct {
-    cells: [dynamic]Cell,
-    rows, cols: Screen_Pos,
+    cells: [][]Cell,
 
     cursor_visible: bool,
     cursor_row, cursor_col: int,
+
+    font_size: int,
+    cell_width: int,
 
     // State of rendering. Used to determine values for the current cell.
     graphics: Graphics_Set,
@@ -70,50 +72,46 @@ Screen :: struct {
     bg_color: Color,
 }
 
-screen_init :: proc(rows, cols: Screen_Pos) -> (screen: Screen, error: mem.Allocator_Error) {
-    cells := make([dynamic]Cell, rows * cols) or_return
+screen_init :: proc(width, height, font_size, cell_width: int) -> (screen: Screen, error: mem.Allocator_Error) {
+    rows_count := int(height / font_size)
+    cols_count := int(width / cell_width)
 
-    for &cell, i in cells {
-        cell = cell_init()
+    rows := make([][]Cell, rows_count) or_return
+    for _, i in rows {
+        rows[i] = make([]Cell, cols_count) or_return
+        for &cell in rows[i] {
+            cell = cell_init()
+        }
     }
 
     return Screen{
-        rows = rows,
-        cols = cols,
-        cells = cells,
+        cells = rows,
         cursor_visible = true,
+        font_size = font_size,
+        cell_width = cell_width,
+        cursor_row = 1,
+        cursor_col = 1,
         fg_color = rgba_table[.white],
         bg_color = rgba_table[.black],
         graphics = {.line_wrapping}
     }, nil
 }
 
-screen_resize :: proc(screen: ^Screen, rows, cols: int) -> mem.Allocator_Error {
-    if rows * cols > len(screen.cells) {
-        cells_for_extra_col := screen.rows * diff(screen.cols, cols)
-        cells_for_extra_row := screen.cols * diff(screen.rows, rows)
-
-        old_len := len(screen.cells)
-        new_len := len(screen.cells) + cells_for_extra_col + cells_for_extra_row
-        assert(new_len > len(screen.cells))
-        resize(&screen.cells, new_len) or_return
-
-        for &cell in screen.cells[old_len:] {
-            cell = cell_init()
-        }
+screen_destroy :: proc(screen: ^Screen) {
+    for &row in screen.cells {
+        for &cell in row do cell_destroy(&cell)
+        delete(row)
     }
-
-    screen.rows = rows
-    screen.cols = cols
-
-    screen.cursor_col = min(screen.cursor_col, screen.cols - 1)
-
-    return nil
+    delete(screen.cells)
 }
 
-screen_destroy :: proc(screen: ^Screen) {
-    for &cell in screen.cells do cell_destroy(&cell)
-    delete(screen.cells)
+screen_rows :: proc(screen: Screen) -> int {
+    return len(screen.cells)
+}
+
+screen_cols :: proc(screen: Screen) -> int {
+    assert(len(screen.cells) > 0) // there must always be at least one row and col 
+    return len(screen.cells[0])
 }
 
 cell_init :: proc(loc := #caller_location) -> Cell {
@@ -127,39 +125,20 @@ cell_destroy :: proc(cell: ^Cell) {
 }
 
 screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
+    assert(len(bytes) > 0)
 
-    if screen.cursor_row >= screen.rows {
-        diff := diff(screen.cursor_row, screen.rows)
-        screen_scroll(screen, max(diff, 1))
-        screen.cursor_row = screen.rows - 1
-    }
-
-    cell_index := one_dim_index(screen.cursor_row , screen.cursor_col, screen.cols)
-
-    if bytes[0] == '\n' {
-        screen.cursor_row = min(screen.cursor_row + 1, screen.rows)
-        screen.cursor_col = 0
-    } else if .line_wrapping in screen.graphics {
-        if screen.cursor_col == screen.cols - 1 {
-            screen.cursor_row += 1
-            screen.cursor_col = 0
-        } else {
-            screen.cursor_col += 1
-        }
-    } else if .line_wrapping not_in screen.graphics {
-        if screen.cursor_col < screen.cols {
-            screen.cursor_col += 1
-        }
+    if screen.cursor_row > screen_rows(screen^) {
+        diff := diff(screen.cursor_row, screen_rows(screen^))
+        screen_scroll(screen, diff)
+        screen.cursor_row = screen_rows(screen^)
     }
 
     { // setting the cell
         ch : rune
         ch, runes_size = utf8.decode_rune(bytes)
-        if cell_index >= len(screen.cells) {
-            return runes_size
-        }
 
-        cell := &screen.cells[cell_index]
+        row := screen.cells[screen.cursor_row - 1] // turn to 0-based
+        cell := &row[screen.cursor_col - 1] // turn to 0-based
         strings.builder_reset(&cell.grapheme)
 
         strings.write_rune(&cell.grapheme, ch)
@@ -168,24 +147,66 @@ screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
         cell.graphics = screen.graphics
     }
 
+    if bytes[0] == '\n' {
+        // screen.cursor_row = min(screen.cursor_row + 1, screen_rows(screen^))
+        screen.cursor_row += 1
+    } else if bytes[0] == '\r' {
+        screen.cursor_col = 1
+    } else if .line_wrapping in screen.graphics {
+        if screen.cursor_col == screen_cols(screen^) {
+            screen.cursor_row += 1
+            screen.cursor_col = 1
+        } else {
+            screen.cursor_col += 1
+        }
+    } else if .line_wrapping not_in screen.graphics {
+        if screen.cursor_col <= screen_cols(screen^) {
+            screen.cursor_col += 1
+        }
+    }
+
     return
 }
 
 screen_scroll :: proc(screen: ^Screen, rows: int) {
     assert(rows > 0)
+    rows := min(rows, screen_rows(screen^))
 
-    destroy_len := screen.cols * rows
-    // free the first row
-    for i in 0..<destroy_len {
-        cell_destroy(&screen.cells[i])
+    // delete the rows to scroll out of the screen
+    // but as an optimization reuse the "deleted" rows
+
+    offset := rows
+    end := screen_rows(screen^) - offset
+    for i in 0..<end {
+        tmp := screen.cells[i]
+        screen.cells[i] = screen.cells[i + offset]
+        screen.cells[i + offset] = tmp
     }
 
-    copied := copy(screen.cells[:], screen.cells[destroy_len:])
-
-    // init the last rows
-    for &cell in screen.cells[copied:] {
-        cell = cell_init()
+    // reset reused rows
+    for row in screen.cells[end:] {
+        for &cell in row {
+            strings.builder_reset(&cell.grapheme)
+        }
     }
+    // destroyed := rows
+    // for row in 0..<destroyed {
+    //     for &cell in screen.cells[row] do cell_destroy(&cell)
+    //     delete(screen.cells[row])
+    // }
+
+    // copied := 0
+    // for row in screen.cells[destroyed:] {
+    //     screen.cells[copied] = row
+    //     copied += 1
+    // }
+
+    // for &row, i in screen.cells[copied:] {
+    //     row = make([]Cell, screen_cols(screen^))
+    //     for &cell in row {
+    //         cell = cell_init()
+    //     }
+    // }
 }
 
 update_screen :: proc(state: ^State) {
@@ -248,23 +269,27 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
     case Command_Move_Row_Col:
         screen.cursor_row = data.row
         screen.cursor_col = data.col
+        screen.cursor_row = bound(screen.cursor_row, 1, screen_rows(screen^))
+        screen.cursor_col = bound(screen.cursor_col, 1, screen_cols(screen^))
     case Command_Move:
         switch data.wise {
-        case .row: screen.cursor_row = data.pos
-        case .col: screen.cursor_col = data.pos
+        case .row:
+            screen.cursor_row = data.pos
+            screen.cursor_row = bound(screen.cursor_row, 1, screen_rows(screen^))
+        case .col:
+            screen.cursor_col = data.pos
+            screen.cursor_col = bound(screen.cursor_col, 1, screen_cols(screen^))
         }
     case Command_Move_Offset:
         switch data.wise {
         case .row:
             screen.cursor_row += data.offset
             // TOOO: check if I'm meant to bounds the value or scroll
-            screen.cursor_row = max(screen.cursor_row, 0)
-            screen.cursor_row = min(screen.cursor_row, screen.rows)
+            screen.cursor_row = bound(screen.cursor_row, 1, screen_rows(screen^))
         case .col:
             screen.cursor_col += data.offset
             // TOOO: check if I'm meant to bounds the value or scroll
-            screen.cursor_col = max(screen.cursor_col, 0)
-            screen.cursor_col = min(screen.cursor_col, screen.cols)
+            screen.cursor_col = bound(screen.cursor_col, 1, screen_cols(screen^))
         }
 
         if data.scroll {
@@ -272,12 +297,12 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
         }
 
         if data.begining_of_line {
-            screen.cursor_col = 0
+            screen.cursor_col = 1
         }
 
     case Command_Set_Alternate_Screen:
         state.focus_on = .alternate if data else .primary
-        log.info("Set", state.focus_on, "screen")
+        log.debug("Set", state.focus_on, "screen")
     case Command_Set_Cursor_Visible:
         screen.cursor_visible = bool(data)
     case Command_Colors_Graphics:
@@ -285,6 +310,7 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
     case Command_Color_Array:
         set_colors(screen, &data)
     case Command_Graphics:
+        defer log.debug("Current Graphics: ", screen.graphics)
         if data.set {
             for g in sa.slice(&data.graphics) {
                 if g == .reset {
@@ -322,4 +348,11 @@ set_colors :: proc(screen: ^Screen, colors: ^Command_Color_Array) {
 @(private)
 diff :: proc(a: int, b: int) -> int {
     return a - b if a >= b else b - a
+}
+
+@(private)
+bound ::proc(a, low, high: int) -> int {
+    a := max(a, low)
+    a = min(a, high)
+    return a
 }
