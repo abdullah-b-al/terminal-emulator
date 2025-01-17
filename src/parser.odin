@@ -120,6 +120,8 @@ parser_parse :: proc(parser: ^Parser) -> (cmd: Command, seq_length: int, error: 
     case ESCAPE: {
         parser_advance(parser)
         switch parser.char {
+        case 0:
+            return {}, 1, ParseError.Incomplete_Sequence
         case '[':
             err : Error = nil
             cmd, err = parse_csi(parser)
@@ -273,10 +275,14 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
         switch string(sa.slice(&joined)) {
         case "?7":
             graphics : Command_Graphics_Array
-            sa.append(&graphics, Graphics_Kind.line_wrapping)
+            sa.append(&graphics, Graphics_Kind.auto_scroll)
             set := false if ch == 'l' else true
             cmd = Command_Graphics{ set=set, graphics=graphics }
-
+        case "4":
+            graphics : Command_Graphics_Array
+            sa.append(&graphics, Graphics_Kind.line_wrap)
+            set := false if ch == 'l' else true
+            cmd = Command_Graphics{ set=set, graphics=graphics }
         case "?25":
             switch ch {
             case 'l':cmd = Command_Set_Cursor_Visible(false)
@@ -351,8 +357,8 @@ parser_collect_and_slice_digits :: proc(parser: ^Parser) -> []byte {
     return parser.data[offset:][:length]
 }
 
-parse_int :: proc(str: string, error_to_return: Error) -> (int, Error) {
-    res, ok := strconv.parse_int(str)
+parse_int :: proc(str: string, error_to_return: Error, loc := #caller_location) -> (int, Error) {
+    res, ok := strconv.parse_int(str, 10)
     if !ok do return {}, error_to_return
     return res, nil
 }

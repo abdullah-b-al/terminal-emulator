@@ -43,7 +43,8 @@ Graphics_Kind :: enum{
     underline,
     blinking,
     strike_through,
-    line_wrapping,
+    auto_scroll, // should we scroll if we reach the end of the screen
+    line_wrap, // should the cursor wrap to the next line
 }
 
 Graphics_Set :: bit_set[Graphics_Kind]
@@ -93,7 +94,7 @@ screen_init :: proc(width, height, font_size, cell_width: int) -> (screen: Scree
         cursor_col = 1,
         fg_color = rgba_table[.white],
         bg_color = rgba_table[.black],
-        graphics = {.line_wrapping}
+        graphics = {.auto_scroll}
     }, nil
 }
 
@@ -127,13 +128,7 @@ cell_destroy :: proc(cell: ^Cell) {
 screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
     assert(len(bytes) > 0)
 
-    if screen.cursor_row > screen_rows(screen^) {
-        diff := diff(screen.cursor_row, screen_rows(screen^))
-        screen_scroll(screen, diff)
-        screen.cursor_row = screen_rows(screen^)
-    }
-
-    { // setting the cell
+    { // set the cell
         ch : rune
         ch, runes_size = utf8.decode_rune(bytes)
 
@@ -148,21 +143,31 @@ screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
     }
 
     if bytes[0] == '\n' {
-        // screen.cursor_row = min(screen.cursor_row + 1, screen_rows(screen^))
         screen.cursor_row += 1
     } else if bytes[0] == '\r' {
         screen.cursor_col = 1
-    } else if .line_wrapping in screen.graphics {
+    } 
+
+    if .line_wrap in screen.graphics {
         if screen.cursor_col == screen_cols(screen^) {
             screen.cursor_row += 1
             screen.cursor_col = 1
         } else {
             screen.cursor_col += 1
         }
-    } else if .line_wrapping not_in screen.graphics {
-        if screen.cursor_col <= screen_cols(screen^) {
-            screen.cursor_col += 1
+    } else {
+        screen.cursor_col = min(screen.cursor_col + 1, screen_cols(screen^))
+    }
+
+    if .auto_scroll in screen.graphics {
+        if screen.cursor_row > screen_rows(screen^) {
+            diff := diff(screen.cursor_row, screen_rows(screen^))
+            screen_scroll(screen, diff)
+            screen.cursor_row = screen_rows(screen^)
         }
+    } else {
+        screen.cursor_row = min(screen.cursor_row, screen_rows(screen^))
+        screen.cursor_col = min(screen.cursor_col, screen_cols(screen^))
     }
 
     return
@@ -267,30 +272,25 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
     switch &data in cmd {
     case Command_Clear_Screen: log.error("Unimplemented command 'clear'")
     case Command_Move_Row_Col:
-        screen.cursor_row = data.row
-        screen.cursor_col = data.col
-        screen.cursor_row = bound(screen.cursor_row, 1, screen_rows(screen^))
-        screen.cursor_col = bound(screen.cursor_col, 1, screen_cols(screen^))
+        cursor_move(screen, data.row, data.col)
     case Command_Move:
+        row := screen.cursor_row
+        col := screen.cursor_col
         switch data.wise {
-        case .row:
-            screen.cursor_row = data.pos
-            screen.cursor_row = bound(screen.cursor_row, 1, screen_rows(screen^))
-        case .col:
-            screen.cursor_col = data.pos
-            screen.cursor_col = bound(screen.cursor_col, 1, screen_cols(screen^))
+        case .row: row = data.pos
+        case .col: col = data.pos
         }
+
+        cursor_move(screen, row, col)
     case Command_Move_Offset:
+        row := screen.cursor_row
+        col := screen.cursor_col
         switch data.wise {
-        case .row:
-            screen.cursor_row += data.offset
-            // TOOO: check if I'm meant to bounds the value or scroll
-            screen.cursor_row = bound(screen.cursor_row, 1, screen_rows(screen^))
-        case .col:
-            screen.cursor_col += data.offset
-            // TOOO: check if I'm meant to bounds the value or scroll
-            screen.cursor_col = bound(screen.cursor_col, 1, screen_cols(screen^))
+        case .row: row += data.offset
+        case .col: col += data.offset
         }
+
+        cursor_move(screen, row, col)
 
         if data.scroll {
             log.error("Unimplemented in command 'Command_Move_Offset.scroll'")
@@ -310,7 +310,8 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
     case Command_Color_Array:
         set_colors(screen, &data)
     case Command_Graphics:
-        defer log.debug("Current Graphics: ", screen.graphics)
+        log.debug("Graphics Before: ", screen.graphics)
+        defer log.debug("Graphics Now: ", screen.graphics)
         if data.set {
             for g in sa.slice(&data.graphics) {
                 if g == .reset {
@@ -329,6 +330,12 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
             }
         }
     }
+}
+
+@(private)
+cursor_move :: proc(screen: ^Screen, row, col: int) {
+    screen.cursor_row = bound(row, 1, screen_rows(screen^))
+    screen.cursor_col = bound(col, 1, screen_cols(screen^))
 }
 
 @(private)
