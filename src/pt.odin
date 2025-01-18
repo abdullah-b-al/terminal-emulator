@@ -2,6 +2,7 @@ package main
 
 import "core:sys/posix"
 import "core:sys/linux"
+import "core:fmt"
 
 FD :: linux.Fd
 
@@ -10,8 +11,11 @@ open_pt :: proc() -> (FD, bool) {
     if master_fd == -1 {
         return FD(master_fd), false
     }
-    posix.grantpt(master_fd)
-    posix.unlockpt(master_fd)
+    ok := posix.grantpt(master_fd)
+    if int(ok) != 0 do return FD(-1), false
+    ok = posix.unlockpt(master_fd)
+    if int(ok) != 0 do return FD(-1), false
+
     return FD(master_fd), true
 }
 
