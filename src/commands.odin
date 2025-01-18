@@ -44,6 +44,16 @@ Command_Move_Offset :: struct {
     scroll: bool,
 }
 
+Command_Erase :: enum {
+    below,
+    above,
+    all,
+}
+
+Command_Insert_Blank_Lines :: distinct int
+
+Command_Set_Scrolling_Region :: [2]int
+
 Command_Colors_Graphics :: struct{
     colors: Command_Color_Array,
     graphics: Command_Graphics_Array,
@@ -68,6 +78,9 @@ Command :: union {
     Command_Color_Array,
     Command_Set_Cursor_Visible,
     Command_Set_Alternate_Screen,
+    Command_Erase,
+    Command_Insert_Blank_Lines,
+    Command_Set_Scrolling_Region,
 }
 
 safe_log_sequence :: proc(buf: []byte, prefix := "Unknown sequence", level: enum{error, info} = .error,location := #caller_location) {

@@ -123,15 +123,21 @@ parser_parse :: proc(parser: ^Parser) -> (cmd: Command, seq_length: int, error: 
         case 0:
             return {}, 1, ParseError.Incomplete_Sequence
         case '[':
-            err : Error = nil
-            cmd, err = parse_csi(parser)
-            if err != nil do return {}, parser.offset, err
+            cmd, error = parse_csi(parser)
+            seq_length = parser.offset
+            return
         case ']':
             safe_log_sequence(parser.data)
             return {}, parser.offset, ParseError.Unknown_Sequence
         case '(', ')':
             cmd, error = parse_g_sets(parser)
-            return cmd, parser.offset, error
+            seq_length = parser.offset
+            return
+        case 'M':
+            parser_advance(parser)
+            cmd = Command_Move_Offset{offset = -1, wise = .row, scroll = true}
+            seq_length = parser.offset
+            return
         case:
             safe_log_sequence(parser.data)
             return {}, parser.offset, ParseError.Unknown_Sequence
@@ -174,16 +180,20 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
         parser_advance(parser)
         switch sa.len(split) {
         case 0:
-            return Command_Move_Row_Col{row=0,col=0}, nil
+            cmd = Command_Move_Row_Col{row=1,col=1}
+        case 1:
+            row := parse_int(transmute(string)sa.get(split, 0), .Invalid_Sequence) or_return
+            cmd = Command_Move_Row_Col{row=row,col=1}
         case 2:
             row := parse_int(transmute(string)sa.get(split, 0), .Invalid_Sequence) or_return
             col := parse_int(transmute(string)sa.get(split, 1), .Invalid_Sequence) or_return
-            return Command_Move_Row_Col{row=row,col=col}, nil
+            cmd = Command_Move_Row_Col{row=row,col=col}
         case:
             safe_log_sequence(parser.data)
             return {}, .Unknown_Sequence
         }
 
+        return
     case 'A'..='G':
         parser_advance(parser)
         if sa.len(split) != 1 { // expect one argument
@@ -299,6 +309,41 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
         }
 
         return
+
+    case 'J':
+        parser_advance(parser)
+        cmd = Command_Erase.below
+
+        if sa.len(joined) > 0 {
+            switch sa.slice(&joined)[0] {
+            case '0': cmd = Command_Erase.below
+            case '1': cmd = Command_Erase.above
+            case '2': cmd = Command_Erase.all
+            case: 
+                safe_log_sequence(parser.data)
+                return {}, .Unknown_Sequence
+            }
+        }
+
+    case 'L':
+        parser_advance(parser)
+        str := "1"
+        if sa.len(split) > 0 do str = string(sa.slice(&split)[0])
+        number := parse_int(str, .Unknown_Sequence) or_return
+        cmd = Command_Insert_Blank_Lines(number)
+
+    case 'r':
+        parser_advance(parser)
+
+        switch sa.len(split) {
+        case 2:
+            start := parse_int(string(sa.get(split, 0)), .Unknown_Sequence) or_return
+            end := parse_int(string(sa.get(split, 1)), .Unknown_Sequence) or_return
+            cmd = Command_Set_Scrolling_Region{start, end}
+        case:
+            safe_log_sequence(parser.data)
+            return {}, .Unknown_Sequence
+        }
     case:
         safe_log_sequence(parser.data)
         return {}, .Unknown_Sequence
@@ -309,10 +354,15 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
 
 parse_g_sets :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
     ch := parser.char
+    assert(ch == '(' || ch == ')')
     parser_advance(parser)
+
     switch ch {
     case '(', ')':
-        parser_advance(parser)
+        switch parser.char {
+            case 'B', '0': parser_advance(parser)
+        }
+
         safe_log_sequence(parser.data, "Unsupported sequence", .info)
         return {}, .Unsupported_Sequence
     case:

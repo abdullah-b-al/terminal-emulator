@@ -7,6 +7,11 @@ import "core:unicode/utf8"
 import "core:log"
 import sa "core:container/small_array"
 
+Scroll_Dir :: enum {
+    down,
+    up
+}
+
 rgba_table := [Color_Kind]Color {
     .black = {0x00, 0x00, 0x00, 0xFF},
     .red = {0xFF, 0x00, 0x00, 0xFF},
@@ -16,8 +21,8 @@ rgba_table := [Color_Kind]Color {
     .magenta = {0xFF, 0x00, 0xFF, 0xFF},
     .cyan = {0x00, 0xFF, 0xFF, 0xFF},
     .white = {0xFF, 0xFF, 0xFF, 0xFF},
-    .default = {0xFF, 0x00, 0x00, 0xFF},
-    .reset = {0xFF, 0x00, 0x00, 0xFF},
+    .default = {0x00, 0x00, 0x00, 0xFF},
+    .reset = {0x00, 0x00, 0x00, 0x00},
 }
 
 Screen_Pos :: int
@@ -48,7 +53,6 @@ Graphics_Kind :: enum{
 }
 
 Graphics_Set :: bit_set[Graphics_Kind]
-Grapheme_Handle :: distinct int
 
 Cell :: struct {
     // TODO: Use a grapheme datatype instead of a string
@@ -60,6 +64,8 @@ Cell :: struct {
 
 Screen :: struct {
     cells: [][]Cell,
+    // range of rows
+    scrolling_region: [2]int,
 
     cursor_visible: bool,
     cursor_row, cursor_col: int,
@@ -87,6 +93,7 @@ screen_init :: proc(width, height, font_size, cell_width: int) -> (screen: Scree
 
     return Screen{
         cells = rows,
+        scrolling_region = {1, rows_count},
         cursor_visible = true,
         font_size = font_size,
         cell_width = cell_width,
@@ -121,6 +128,13 @@ cell_init :: proc(loc := #caller_location) -> Cell {
     return Cell{ grapheme = builder }
 }
 
+cell_reset :: proc(cell: ^Cell, screen: Screen) {
+    strings.builder_reset(&cell.grapheme)
+    cell.fg_color = screen.fg_color
+    cell.bg_color = screen.bg_color
+    cell.graphics = screen.graphics
+}
+
 cell_destroy :: proc(cell: ^Cell) {
     strings.builder_destroy(&cell.grapheme)
 }
@@ -134,12 +148,8 @@ screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
 
         row := screen.cells[screen.cursor_row - 1] // turn to 0-based
         cell := &row[screen.cursor_col - 1] // turn to 0-based
-        strings.builder_reset(&cell.grapheme)
-
+        cell_reset(cell, screen^)
         strings.write_rune(&cell.grapheme, ch)
-        cell.fg_color = screen.fg_color
-        cell.bg_color = screen.bg_color
-        cell.graphics = screen.graphics
     }
 
     if bytes[0] == '\n' {
@@ -162,7 +172,7 @@ screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
     if .auto_scroll in screen.graphics {
         if screen.cursor_row > screen_rows(screen^) {
             diff := diff(screen.cursor_row, screen_rows(screen^))
-            screen_scroll(screen, diff)
+            screen_scroll_whole(screen, .down, diff)
             screen.cursor_row = screen_rows(screen^)
         }
     } else {
@@ -173,45 +183,70 @@ screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
     return
 }
 
-screen_scroll :: proc(screen: ^Screen, rows: int) {
-    assert(rows > 0)
-    rows := min(rows, screen_rows(screen^))
+screen_scroll_whole :: proc (screen: ^Screen, dir : Scroll_Dir, count: int) {
+    start := screen.scrolling_region[0]
+    end := screen.scrolling_region[1]
+    screen_scroll_region(screen, dir, count, start, end)
+}
 
-    // delete the rows to scroll out of the screen
-    // but as an optimization reuse the "deleted" rows
+/* scroll the specified (inclusive) row range. */
+screen_scroll_region :: proc(screen: ^Screen, dir: Scroll_Dir, count, start, end: int) {
+    end := min(end, screen_rows(screen^))
 
-    offset := rows
-    end := screen_rows(screen^) - offset
-    for i in 0..<end {
-        tmp := screen.cells[i]
-        screen.cells[i] = screen.cells[i + offset]
-        screen.cells[i + offset] = tmp
+    assert(end >= start)
+    assert(start >= 1)
+    assert(count > 0)
+
+    cells := screen.cells[start - 1:end] // to 0-based. Inclusive range
+
+    count := min(count, len(cells))
+    deleted := make([dynamic][]Cell, 0, count)
+    defer {
+        if len(deleted) > 0 do panic("Leaked some rows")
+        delete(deleted)
     }
 
-    // reset reused rows
-    for row in screen.cells[end:] {
-        for &cell in row {
-            strings.builder_reset(&cell.grapheme)
+    if end == start {
+        screen_erase_rows(screen, start, end)
+        return
+    }
+
+    switch dir {
+    case .down: // screen moves down, text moves up
+        // delete top rows
+        for row in 0..<count {
+            append(&deleted, cells[row])
+        }
+
+        offset := len(deleted)
+        // move valid rows up
+        copy(cells, cells[offset:])
+
+        last_valid_row := len(cells) - offset
+        for row in last_valid_row..<len(cells) {
+            new_row := pop(&deleted)
+            for &cell in new_row do cell_reset(&cell, screen^)
+            cells[row] = new_row
+        }
+
+    case .up: // screen moves up, text moves down
+        // delete bottom rows
+        last_valid_row := len(cells) - count
+        for row in last_valid_row..<len(cells) {
+            append(&deleted, cells[row])
+        }
+
+        // move valid rows down
+        for i := len(cells) - 1; i - count >= 0; i -= 1 {
+            cells[i] = cells[i - count]
+        }
+
+        for row in 0..<count {
+            new_row := pop(&deleted)
+            for &cell in new_row do cell_reset(&cell, screen^)
+            cells[row] = new_row
         }
     }
-    // destroyed := rows
-    // for row in 0..<destroyed {
-    //     for &cell in screen.cells[row] do cell_destroy(&cell)
-    //     delete(screen.cells[row])
-    // }
-
-    // copied := 0
-    // for row in screen.cells[destroyed:] {
-    //     screen.cells[copied] = row
-    //     copied += 1
-    // }
-
-    // for &row, i in screen.cells[copied:] {
-    //     row = make([]Cell, screen_cols(screen^))
-    //     for &cell in row {
-    //         cell = cell_init()
-    //     }
-    // }
 }
 
 update_screen :: proc(state: ^State) {
@@ -242,7 +277,7 @@ update_screen :: proc(state: ^State) {
             case ParseError: switch e {
                 case .Incomplete_Sequence:
 
-                    safe_log_sequence(buf[i:buf_size], "Incomplete sequence", .info)
+                    // safe_log_sequence(buf[i:buf_size], "Incomplete sequence", .info)
                     buf_size = copy(buf[:], buf[i:buf_size])
                     read, err := read_from_fd(state.pt_fd, buf[buf_size:])
                     buf_size += read
@@ -263,6 +298,17 @@ update_screen :: proc(state: ^State) {
             case mem.Allocator_Error:
                 log.error("Allocator_Error:", e)
             }
+        }
+    }
+}
+
+/* clear the specified (inclusive) row range. */
+screen_erase_rows :: proc(screen: ^Screen, start, end: int) {
+    assert(end >= start)
+
+    for row in start..=end {
+        for &cell in screen.cells[row - 1] {
+            cell_reset(&cell, screen^)
         }
     }
 }
@@ -293,7 +339,11 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
         cursor_move(screen, row, col)
 
         if data.scroll {
-            log.error("Unimplemented in command 'Command_Move_Offset.scroll'")
+            if data.offset > 0 {
+                screen_scroll_whole(screen, .down, data.offset)
+            } else {
+                screen_scroll_whole(screen, .up, -data.offset) // make it Positive
+            }
         }
 
         if data.begining_of_line {
@@ -314,28 +364,48 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
         defer log.debug("Graphics Now: ", screen.graphics)
         if data.set {
             for g in sa.slice(&data.graphics) {
-                if g == .reset {
-                    screen.graphics = {}
-                } else {
-                    screen.graphics += {g}
-                }
+                screen.graphics += {g}
+                if g == .reset do screen.graphics = {}
             }
         } else {
             for g in sa.slice(&data.graphics) {
-                if g == .reset {
-                    screen.graphics = {}
-                } else {
-                    screen.graphics -= {g}
-                }
+                screen.graphics -= {g}
+                if g == .reset do screen.graphics = {}
             }
         }
-    }
+
+    case Command_Erase:
+        start := 1
+        end := 1
+        switch data {
+        case .below:
+            start = screen.cursor_row
+            end = screen_rows(screen^)
+        case .above:
+            start = 1
+            end = screen.cursor_row
+        case .all:
+            start = 1
+            end = screen_rows(screen^)
+        }
+
+        screen_erase_rows(screen, start, end)
+
+    case Command_Insert_Blank_Lines:
+        start := screen.cursor_row
+        screen_scroll_region(screen, .up, int(data), start, screen_rows(screen^))
+
+    case Command_Set_Scrolling_Region:
+        screen.scrolling_region = data
+    } // end of switch
+
 }
 
 @(private)
 cursor_move :: proc(screen: ^Screen, row, col: int) {
     screen.cursor_row = bound(row, 1, screen_rows(screen^))
     screen.cursor_col = bound(col, 1, screen_cols(screen^))
+    log.debug("Cursor moved:", screen.cursor_row, screen.cursor_col)
 }
 
 @(private)
