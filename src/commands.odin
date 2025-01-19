@@ -44,10 +44,14 @@ Command_Move_Offset :: struct {
     scroll: bool,
 }
 
-Command_Erase :: enum {
-    below,
-    above,
+Command_Erase_Dir :: enum {
+    after,
+    before,
     all,
+}
+Command_Erase :: struct {
+    wise : enum{row, col},
+    dir: Command_Erase_Dir,
 }
 
 Command_Insert_Blank_Lines :: distinct int

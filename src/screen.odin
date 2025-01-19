@@ -300,6 +300,16 @@ update_screen :: proc(state: ^State) {
             }
         }
     }
+/* clear the specified (inclusive) col range. */
+screen_erase_cols :: proc(screen: ^Screen, row, start, end: int) {
+    assert(end >= start)
+    assert(row <= screen_rows(screen^))
+    assert(row > 0)
+    cols := screen.cells[row - 1]
+
+    for &cell in cols[start-1:end] {
+        cell_reset(&cell, screen^)
+    }
 }
 
 /* clear the specified (inclusive) row range. */
@@ -377,19 +387,23 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
     case Command_Erase:
         start := 1
         end := 1
-        switch data {
-        case .below:
-            start = screen.cursor_row
-            end = screen_rows(screen^)
-        case .above:
+        switch data.dir {
+        case .after:
+            start = screen.cursor_row if data.wise == .row else screen.cursor_col
+            end = screen_rows(screen^) if data.wise == .row else screen_cols(screen^)
+        case .before:
             start = 1
-            end = screen.cursor_row
+            end = screen.cursor_row if data.wise == .row else screen.cursor_col
         case .all:
             start = 1
-            end = screen_rows(screen^)
+            end = screen_rows(screen^) if data.wise == .row else screen_cols(screen^)
         }
 
-        screen_erase_rows(screen, start, end)
+        switch data.wise {
+        case .row: screen_erase_rows(screen, start, end)
+        case .col: screen_erase_cols(screen, screen.cursor_row, start, end)
+        }
+        
 
     case Command_Insert_Blank_Lines:
         start := screen.cursor_row

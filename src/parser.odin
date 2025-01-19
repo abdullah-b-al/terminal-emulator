@@ -307,20 +307,25 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
 
         return
 
-    case 'J':
+    case 'J', 'K':
         parser_advance(parser)
-        cmd = Command_Erase.below
-
+        dir := Command_Erase_Dir.after
         if sa.len(joined) > 0 {
             switch sa.slice(&joined)[0] {
-            case '0': cmd = Command_Erase.below
-            case '1': cmd = Command_Erase.above
-            case '2': cmd = Command_Erase.all
+            case '0': dir = Command_Erase_Dir.after
+            case '1': dir = Command_Erase_Dir.before
+            case '2': dir = Command_Erase_Dir.all
             case: 
                 safe_log_sequence(parser.data)
                 return {}, .Unknown_Sequence
             }
         }
+
+        cmd = Command_Erase{
+            wise = .row if ch == 'J' else .col,
+            dir = dir,
+        }
+
 
     case 'L':
         parser_advance(parser)
