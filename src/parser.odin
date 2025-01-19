@@ -237,25 +237,25 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
         joined_str := string(sa.slice(&joined))
         joined_sub := joined_str[:5] if len(joined_str) >= 5 else joined_str
         switch joined_sub {
-            case "38;5;", "48;5;":
-                key, ok := sa.get_safe(split, 2)
-                if !ok {
-                    safe_log_sequence(parser.data, "Invalid Sequence")
-                    return {}, .Invalid_Sequence
-                }
+        case "38;5;", "48;5;":
+            key, ok := sa.get_safe(split, 2)
+            if !ok {
+                safe_log_sequence(parser.data, "Invalid Sequence")
+                return {}, .Invalid_Sequence
+            }
 
-                color, found := colors_256_table[string(key)]
-                if !found {
-                    safe_log_sequence(parser.data, "Unknown color")
-                    return {}, nil
-                }
+            color, found := colors_256_table[string(key)]
+            if !found {
+                safe_log_sequence(parser.data, "Unknown color")
+                return {}, nil
+            }
 
-                layer := string(sa.get(split, 0))
-                color.layer = .fg if layer == "38" else .bg
+            layer := string(sa.get(split, 0))
+            color.layer = .fg if layer == "38" else .bg
 
-                array : Command_Color_Array
-                sa.append(&array, color)
-                cmd = array
+            array : Command_Color_Array
+            sa.append(&array, color)
+            cmd = array
         case:
             result := Command_Colors_Graphics{}
             for arg in sa.slice(&split) {
@@ -278,9 +278,6 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
 
     case 'l', 'h':
         parser_advance(parser)
-
-        Table :: struct{key: string, value: Command}
-        table : []Table
 
         switch string(sa.slice(&joined)) {
         case "?7":
