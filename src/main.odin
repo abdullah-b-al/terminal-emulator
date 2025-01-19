@@ -11,8 +11,20 @@ import "core:time"
 import "core:io"
 import "core:c"
 import "core:log"
+import "core:unicode/utf8"
 import sa "core:container/small_array"
 import "base:runtime"
+
+Mode :: enum {
+    echo,
+    canonical,
+}
+Modes :: bit_set[Mode]
+
+mode_map := map[posix.CLocal_Flag_Bits]Mode {
+    .ECHO = .echo,
+    .ICANON = .canonical,
+}
 
 State :: struct {
     // Writing to this will send data to the slave
@@ -21,6 +33,7 @@ State :: struct {
     primary: Screen,
     alternate: Screen,
     focus_on: enum{primary, alternate},
+    modes: Modes,
 }
 
 enable_raw_mode :: proc() {
@@ -30,9 +43,19 @@ enable_raw_mode :: proc() {
     posix.tcsetattr(posix.STDIN_FILENO, posix.TC_Optional_Action.TCSAFLUSH, &raw);
 }
 
+set_termios :: proc(state: ^State) {
+    raw : posix.termios
+    posix.tcgetattr(posix.FD(state.pt_fd), &raw);
+    modes : Modes
+    for flag in raw.c_lflag {
+        modes += {mode_map[flag]}
+    }
+    state.modes = modes
+}
+
 main :: proc() {
 
-    context.logger = log.create_console_logger()
+    context.logger = log.create_console_logger(lowest = log.Level.Info)
 
     // str := "\x1B[1;3m hello there"
     // commands := "\x1B[5B\x1B[1;31mRed Hello"
@@ -43,6 +66,7 @@ main :: proc() {
     defer tracking_allocator_report(track)
 
     state : State
+    state.modes = {.echo, .canonical}
 
     // program := transmute(string)program_buf[:program_buf_size]
     argv : sa.Small_Array(256, string)
@@ -75,7 +99,8 @@ main :: proc() {
         os.exit(1)
     case 0: // child
         linux.close(state.pt_fd) // not needed in the child
-        linux.setsid()
+        _, err := linux.setsid()
+        if err != linux.Errno.NONE do panic("setsid failed")
         linux.dup2(slave_fd, 0)
         linux.dup2(slave_fd, 1)
         linux.dup2(slave_fd, 2)
@@ -107,7 +132,9 @@ start_program :: proc (argv: []string) -> mem.Allocator_Error {
 }
 
 start_ui :: proc(state: ^State) {
-    rl.InitWindow(1000, 1000, "Hello there!")
+    rl.SetConfigFlags({.WINDOW_RESIZABLE})
+    rl.InitWindow(1000, 1000, "TestWindow")
+    rl.SetExitKey(.KEY_NULL)
     defer rl.CloseWindow()
     rl.SetTargetFPS(60)
 
@@ -121,35 +148,32 @@ start_ui :: proc(state: ^State) {
     // context_alloctor := context.allocator
 
     {
-        screen, error := screen_init(50, 100)
+        font_size := 15
+        cell_width := int(rl.MeasureText("M", c.int(font_size)))
+        width := int(rl.GetScreenWidth())
+        height := int(rl.GetScreenHeight())
+        screen, error := screen_init(width, height, font_size, cell_width)
         state.primary = screen
 
-        screen, error = screen_init(50, 100)
+        screen, error = screen_init(width, height, font_size, cell_width)
         state.alternate = screen
-
     }
+
     defer {
         screen_destroy(&state.primary)
         screen_destroy(&state.alternate)
     }
 
     for ! rl.WindowShouldClose() {
-
-        for ch := rl.GetCharPressed(); ch > 0; ch = rl.GetCharPressed() {
-            _, err := strings.write_rune(&buffered_input, ch)
-            if err != nil {
-                log.error("input err: ", err)
-                break
-            }
+        set_termios(state)
+        if rl.IsWindowResized() {
+            new_rows := int(rl.GetScreenHeight()) / state.primary.font_size
+            new_cols := int(rl.GetScreenWidth()) / state.primary.cell_width
+            // screen_resize(&state.primary, new_rows, new_cols)
+            // screen_resize(&state.alternate, new_rows, new_cols)
         }
 
-        if rl.IsKeyPressed(.ENTER) || rl.IsKeyPressedRepeat(.ENTER) {
-            strings.write_rune(&buffered_input, rune('\n'))
-            if _, err := os.write(os.Handle(state.pt_fd), buffered_input.buf[:]); err != nil {
-                fmt.eprintln("writing to master err: ", err)
-            }
-            strings.builder_reset(&buffered_input)
-        }
+        handle_input(state, &buffered_input)
 
         update_screen(state)
         // context.allocator = arena_allocator
@@ -164,7 +188,6 @@ start_ui :: proc(state: ^State) {
         free_all(context.temp_allocator)
     }
 }
-
 clone_strings_to_cstring :: proc(strs: []string) -> []cstring {
     result := make([]cstring, len(strs) + 1)
     for str, i in strs do result[i] = strings.clone_to_cstring(str)
@@ -203,14 +226,18 @@ print_from_fd :: proc(fd: FD) {
 tracking_allocator_report :: proc(track: mem.Tracking_Allocator) {
     if len(track.allocation_map) > 0 {
         fmt.eprintf("=== %v allocations not freed: ===\n", len(track.allocation_map))
+    }
+
+    if len(track.allocation_map) > 0 {
         for _, entry in track.allocation_map {
-            fmt.eprintf("- %v bytes @ %v\n", entry.size, entry.location)
+            fmt.eprintf("- %v bytes @ %v %v\n", entry.size, entry.location, entry.location.procedure)
         }
     }
+
     if len(track.bad_free_array) > 0 {
         fmt.eprintf("=== %v incorrect frees: ===\n", len(track.bad_free_array))
         for entry in track.bad_free_array {
-            fmt.eprintf("- %p @ %v\n", entry.memory, entry.location)
+            fmt.eprintf("- %p @ %v %v\n", entry.memory, entry.location, entry.location.procedure)
         }
     }
 }

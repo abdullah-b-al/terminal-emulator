@@ -41,10 +41,12 @@ render_screen :: proc(state: State, screen: ^Screen, buffered_input: string) {
         x := c.int(screen.cursor_col - 1) * cell_width
         y := c.int(screen.cursor_row - 1) * cell_height
 
-        for ch in buffered_input {
-            pos := [2]f32{f32(x),f32(y)}
-            rl.DrawTextCodepoint(rl.GetFontDefault(), ch, pos, f32(font_size), rl.Color(screen.fg_color))
-            x += cell_width
+        if .echo in state.modes {
+            for ch in buffered_input {
+                pos := [2]f32{f32(x),f32(y)}
+                rl.DrawTextCodepoint(rl.GetFontDefault(), ch, pos, f32(font_size), rl.Color(screen.fg_color))
+                x += cell_width
+            }
         }
 
         rl.DrawRectangle(x, y, cell_width, cell_height, rl.Color(screen.fg_color))
