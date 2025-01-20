@@ -28,6 +28,11 @@ Command_Color :: struct {
     bright: bool,
 }
 
+Command_RGB :: struct {
+    foreground: bool,
+    color: [3]u8,
+}
+
 Command_Move_Row_Col :: struct {
     row, col : Screen_Pos,
 }
@@ -85,6 +90,7 @@ Command :: union {
     Command_Erase,
     Command_Insert_Blank_Lines,
     Command_Set_Scrolling_Region,
+    Command_RGB,
 }
 
 safe_log_sequence :: proc(buf: []byte, prefix := "Unknown sequence", level: enum{error, info} = .error,location := #caller_location) {

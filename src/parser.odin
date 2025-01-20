@@ -237,12 +237,22 @@ parse_csi :: proc(parser: ^Parser) -> (cmd: Command, error: Error) {
         joined_str := string(sa.slice(&joined))
         joined_sub := joined_str[:5] if len(joined_str) >= 5 else joined_str
         switch joined_sub {
-        case "38;5;", "48;5;":
-            key, ok := sa.get_safe(split, 2)
-            if !ok {
-                safe_log_sequence(parser.data, "Invalid Sequence")
-                return {}, .Invalid_Sequence
+        case "38;2;", "48;2;":
+            sr := string(small_array_get(split, 2, .Invalid_Sequence) or_return)
+            sg := string(small_array_get(split, 3, .Invalid_Sequence) or_return)
+            sb := string(small_array_get(split, 4, .Invalid_Sequence) or_return)
+
+            r := u8(parse_int(sr, .Invalid_Sequence) or_return)
+            g := u8(parse_int(sg, .Invalid_Sequence) or_return)
+            b := u8(parse_int(sb, .Invalid_Sequence) or_return)
+
+            cmd = Command_RGB{
+                foreground = string(sa.get(split, 0)) == "38",
+                color = {r, g, b}
             }
+
+        case "38;5;", "48;5;":
+            key := small_array_get(split, 2, .Invalid_Sequence) or_return
 
             color, found := colors_256_table[string(key)]
             if !found {
@@ -418,4 +428,11 @@ parse_int :: proc(str: string, error_to_return: Error, loc := #caller_location) 
 @(private="file")
 equal :: proc(bytes: []byte, str: string) -> bool {
     return slice.equal(bytes, transmute([]byte)str)
+}
+
+@(private="file")
+small_array_get :: proc(a: $A/sa.Small_Array($N, $T), index: int, error: Error) -> (T, Error) {
+    t, ok := sa.get_safe(a, index)
+    if !ok do return t, error
+    return t, nil
 }

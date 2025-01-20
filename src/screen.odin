@@ -414,6 +414,12 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
 
     case Command_Set_Scrolling_Region:
         screen.scrolling_region = data
+    case Command_RGB:
+        if data.foreground {
+            screen.fg_color.rgb = data.color.rgb
+        } else {
+            screen.bg_color.rgb = data.color.rgb
+        }
     } // end of switch
 
 }
