@@ -142,42 +142,39 @@ cell_destroy :: proc(cell: ^Cell) {
 screen_set_cell :: proc(screen: ^Screen, bytes: []byte) -> (runes_size: int) {
     assert(len(bytes) > 0)
 
-    { // set the cell
-        ch : rune
-        ch, runes_size = utf8.decode_rune(bytes)
-
+    {
         row := screen.cells[screen.cursor_row - 1] // turn to 0-based
         cell := &row[screen.cursor_col - 1] // turn to 0-based
         cell_reset(cell, screen^)
-        strings.write_rune(&cell.grapheme, ch)
+        decode_bytes(bytes, &cell.grapheme)
+        runes_size = strings.builder_len(cell.grapheme)
     }
 
-    if bytes[0] == '\n' {
-        screen.cursor_row += 1
-    } else if bytes[0] == '\r' {
-        screen.cursor_col = 1
-    } 
+    for byte in bytes[:runes_size] {
+        switch byte {
+        case '\n': cursor_move(screen, screen.cursor_row + 1, screen.cursor_col)
+        case '\r': cursor_move(screen, screen.cursor_row, 1)
+        }
+    }
 
     if .line_wrap in screen.graphics {
         if screen.cursor_col == screen_cols(screen^) {
-            screen.cursor_row += 1
-            screen.cursor_col = 1
+            cursor_move(screen, screen.cursor_row + 1, 1)
         } else {
-            screen.cursor_col += 1
+            cursor_move(screen, screen.cursor_row, screen.cursor_col + 1)
         }
-    } else {
-        screen.cursor_col = min(screen.cursor_col + 1, screen_cols(screen^))
+    } else if bytes[0] != '\r' {
+        cursor_move(screen, screen.cursor_row, screen.cursor_col + 1)
     }
 
     if .auto_scroll in screen.graphics {
         if screen.cursor_row > screen_rows(screen^) {
-            diff := diff(screen.cursor_row, screen_rows(screen^))
+            diff := screen.cursor_row - screen_rows(screen^)
             screen_scroll_whole(screen, .down, diff)
-            screen.cursor_row = screen_rows(screen^)
+            cursor_move(screen, screen.cursor_row, screen.cursor_col)
         }
     } else {
-        screen.cursor_row = min(screen.cursor_row, screen_rows(screen^))
-        screen.cursor_col = min(screen.cursor_col, screen_cols(screen^))
+        cursor_move(screen, screen.cursor_row, screen.cursor_col)
     }
 
     return
@@ -312,6 +309,7 @@ screen_erase_cols :: proc(screen: ^Screen, row, start, end: int) {
     }
 }
 
+
 /* clear the specified (inclusive) row range. */
 screen_erase_rows :: proc(screen: ^Screen, start, end: int) {
     assert(end >= start)
@@ -357,7 +355,7 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
         }
 
         if data.begining_of_line {
-            screen.cursor_col = 1
+            cursor_move(screen, screen.cursor_row, screen.cursor_col)
         }
 
     case Command_Set_Alternate_Screen:
@@ -415,11 +413,28 @@ apply_command :: proc(state: ^State, screen: ^Screen, cmd: Command) {
 
 }
 
+decode_bytes :: proc(bytes: []byte, builder: ^strings.Builder) {
+    assert(len(bytes) > 0)
+    switch bytes[0] {
+    case '\r', '\n':
+        loop: for byte in bytes {
+            switch byte {
+            case '\r','\n':
+                strings.write_rune(builder, rune(byte))
+            case: break loop
+            }
+        }
+    case:
+        ch, _ := utf8.decode_rune(bytes)
+        strings.write_rune(builder, ch)
+    }
+}
+
 @(private)
-cursor_move :: proc(screen: ^Screen, row, col: int) {
+cursor_move :: proc(screen: ^Screen, row, col: int, loc := #caller_location) {
     screen.cursor_row = bound(row, 1, screen_rows(screen^))
     screen.cursor_col = bound(col, 1, screen_cols(screen^))
-    log.debug("Cursor moved:", screen.cursor_row, screen.cursor_col)
+    log.debug("Cursor moved:", screen.cursor_row, screen.cursor_col, location = loc)
 }
 
 @(private)

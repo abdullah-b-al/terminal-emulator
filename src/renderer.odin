@@ -30,7 +30,7 @@ render_screen :: proc(state: State, screen: ^Screen, buffered_input: string) {
                     context.temp_allocator
                 )
 
-                if cstr != " " && cstr != "\n" && cstr != "\r" {
+                if !strings.contains_any(string(cstr), "\n\r\t ") {
                     rl.DrawText(cstr, x,y, font_size, rl.Color(cell.fg_color))
                 }
             }
