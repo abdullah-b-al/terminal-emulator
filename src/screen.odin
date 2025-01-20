@@ -246,9 +246,10 @@ screen_scroll_region :: proc(screen: ^Screen, dir: Scroll_Dir, count, start, end
     }
 }
 
-update_screen :: proc(state: ^State) {
+update_screen :: proc(state: ^State) -> bool {
     buf: [512]byte
     buf_size, err := read_from_fd(state.pt_fd, buf[:])
+    if buf_size == 0 do return false
 
     row, col : int
     i : int
@@ -297,6 +298,10 @@ update_screen :: proc(state: ^State) {
             }
         }
     }
+
+    return true
+}
+
 /* clear the specified (inclusive) col range. */
 screen_erase_cols :: proc(screen: ^Screen, row, start, end: int) {
     assert(end >= start)
