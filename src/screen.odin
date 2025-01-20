@@ -247,12 +247,31 @@ screen_scroll_region :: proc(screen: ^Screen, dir: Scroll_Dir, count, start, end
 }
 
 update_screen :: proc(state: ^State) -> bool {
-    buf: [512]byte
-    buf_size, err := read_from_fd(state.pt_fd, buf[:])
+    read_all_at :: proc(fd: FD, buf: ^[dynamic]byte, index: int) -> (size: int) {
+        assert(index <= len(buf))
+        index := index
+        for there_is_data_to_read(fd, 10){
+            read, _ := read_from_fd(fd, buf[index:])
+            size += read
+            switch size {
+            case len(buf):
+                index = len(buf)
+                resize(buf, len(buf) * 2)
+            case 0: return 0
+            case: return size
+            }
+        }
+
+        return size
+    }
+
+
+    buf := make([dynamic]byte, 512, context.temp_allocator)
+    buf_size := read_all_at(state.pt_fd, &buf, 0)
     if buf_size == 0 do return false
+    i : int
 
     row, col : int
-    i : int
     for i < buf_size {
         screen : ^Screen
         switch state.focus_on {
@@ -275,10 +294,9 @@ update_screen :: proc(state: ^State) -> bool {
             case ParseError: switch e {
                 case .Incomplete_Sequence:
 
-                    // safe_log_sequence(buf[i:buf_size], "Incomplete sequence", .info)
+                    safe_log_sequence(buf[i:], "Incomplete sequence", .info)
                     buf_size = copy(buf[:], buf[i:buf_size])
-                    read, err := read_from_fd(state.pt_fd, buf[buf_size:])
-                    buf_size += read
+                    buf_size += read_all_at(state.pt_fd, &buf, buf_size)
                     i = 0
                     continue loop
 
